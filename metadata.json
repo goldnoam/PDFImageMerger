@@ -1,0 +1,5 @@
+{
+  "name": "PDF Image Merger",
+  "description": "An interactive tool to drag and drop an image onto a PDF file, position it, and download the merged result. All processing is done in your browser.",
+  "requestFramePermissions": []
+}
