@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSettings } from '../contexts/SettingsContext';
 
 interface DraggableResizableImageProps {
   src: string;
@@ -15,6 +16,7 @@ type DragState = {
 };
 
 const DraggableResizableImage: React.FC<DraggableResizableImageProps> = ({ src, initialPosition, initialSize, onUpdate, bounds }) => {
+  const { t } = useSettings();
   const [position, setPosition] = useState(initialPosition);
   const [size, setSize] = useState(initialSize);
   const [isFocused, setIsFocused] = useState(false);
@@ -148,7 +150,7 @@ const DraggableResizableImage: React.FC<DraggableResizableImageProps> = ({ src, 
         handleInteractionEnd();
       }}
     >
-      <img src={src} alt="Draggable" style={{ width: '100%', height: '100%', objectFit: 'contain' }} draggable="false" />
+      <img src={src} alt={t('draggableImageAlt')} style={{ width: '100%', height: '100%', objectFit: 'contain' }} draggable="false" />
       <div
         style={{
           position: 'absolute',

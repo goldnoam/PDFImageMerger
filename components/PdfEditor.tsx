@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeftIcon, ArrowRightIcon, DownloadIcon, ResetIcon, ClearIcon } from './Icons';
 import DraggableResizableImage from './DraggableResizableImage';
+import { useSettings } from '../contexts/SettingsContext';
 
 // pdfjs-dist is not imported via npm, so we use a dynamic import from a CDN.
 // This is a common pattern when ESM modules are loaded from URLs.
@@ -22,6 +23,7 @@ interface PdfEditorProps {
 const PdfEditor: React.FC<PdfEditorProps> = ({ pdfFile, image, onImageUpdate, onMerge, isProcessing, onImageReset, onImageClear }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { t } = useSettings();
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -91,14 +93,13 @@ const PdfEditor: React.FC<PdfEditorProps> = ({ pdfFile, image, onImageUpdate, on
   const goToNextPage = () => setCurrentPage(p => Math.min(totalPages, p + 1));
 
   const handleMergeClick = () => {
-    // pdf-lib is 0-indexed, UI is 1-indexed
     onMerge(currentPage - 1, scale);
   }
 
   return (
-    <div className="w-full h-full flex flex-col relative bg-black/20">
+    <div className="w-full h-full flex flex-col relative bg-overlay-bg/5">
       <div ref={containerRef} className="flex-grow flex items-center justify-center p-4 overflow-auto relative">
-        {isLoading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><div className="loader"></div><style>{`.loader { border: 4px solid #f3f3f340; border-top: 4px solid #6a45ff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; } @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style></div>}
+        {isLoading && <div className="absolute inset-0 bg-brand-surface/80 flex items-center justify-center z-20"><div className="loader"></div><style>{`.loader { border: 4px solid #f3f3f340; border-top: 4px solid #6a45ff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; } @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style></div>}
         <div style={{ position: 'relative', lineHeight: 0 }}>
             <canvas ref={canvasRef} className="rounded-md shadow-lg" />
             {image && canvasRef.current && (
@@ -117,12 +118,12 @@ const PdfEditor: React.FC<PdfEditorProps> = ({ pdfFile, image, onImageUpdate, on
             )}
         </div>
       </div>
-      <div className="flex-shrink-0 bg-brand-surface/70 backdrop-blur-sm p-3 flex justify-between items-center border-t border-white/10">
+      <div className="flex-shrink-0 bg-brand-surface/70 backdrop-blur-sm p-3 flex justify-between items-center border-t border-border-color">
         <div className="flex items-center gap-3">
           <button onClick={goToPrevPage} disabled={currentPage <= 1} className="p-2 rounded-md hover:bg-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             <ArrowLeftIcon className="w-5 h-5" />
           </button>
-          <span className="text-sm font-medium">Page {currentPage} of {totalPages}</span>
+          <span className="text-sm font-medium">{t('page')} {currentPage} {t('of')} {totalPages}</span>
           <button onClick={goToNextPage} disabled={currentPage >= totalPages} className="p-2 rounded-md hover:bg-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             <ArrowRightIcon className="w-5 h-5" />
           </button>
@@ -130,13 +131,13 @@ const PdfEditor: React.FC<PdfEditorProps> = ({ pdfFile, image, onImageUpdate, on
         <div className="flex items-center gap-2">
             {image && (
                 <>
-                    <button onClick={onImageReset} disabled={isProcessing} className="p-2 rounded-md hover:bg-brand-primary/20 disabled:opacity-50 transition-colors" title="Reset Image Position & Size">
+                    <button onClick={onImageReset} disabled={isProcessing} className="p-2 rounded-md hover:bg-brand-primary/20 disabled:opacity-50 transition-colors" title={t('resetTooltip')}>
                         <ResetIcon className="w-5 h-5" />
                     </button>
-                    <button onClick={onImageClear} disabled={isProcessing} className="p-2 rounded-md hover:bg-brand-secondary/20 disabled:opacity-50 transition-colors" title="Remove Image">
+                    <button onClick={onImageClear} disabled={isProcessing} className="p-2 rounded-md hover:bg-brand-secondary/20 disabled:opacity-50 transition-colors" title={t('removeTooltip')}>
                         <ClearIcon className="w-5 h-5 text-brand-secondary" />
                     </button>
-                    <div className="w-px h-6 bg-white/20 mx-1"></div>
+                    <div className="w-px h-6 bg-border-color mx-1"></div>
                 </>
             )}
             <button
@@ -147,12 +148,12 @@ const PdfEditor: React.FC<PdfEditorProps> = ({ pdfFile, image, onImageUpdate, on
               {isProcessing ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
-                  <span>Processing...</span>
+                  <span>{t('processingButton')}</span>
                 </>
               ) : (
                 <>
                   <DownloadIcon className="w-5 h-5" />
-                  <span>Merge & Download</span>
+                  <span>{t('mergeButton')}</span>
                 </>
               )}
             </button>

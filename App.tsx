@@ -1,7 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import FileDropzone from './components/FileDropzone';
 import PdfEditor from './components/PdfEditor';
-import { DownloadIcon } from './components/Icons';
+import { DownloadIcon, SettingsIcon } from './components/Icons';
+import SettingsMenu from './components/SettingsMenu';
+import { useSettings } from './contexts/SettingsContext';
+
 
 // pdf-lib is loaded from CDN and available as a global
 declare const PDFLib: any;
@@ -20,11 +23,64 @@ const initialImageState: ImageState = {
   objectUrl: null,
 };
 
+/**
+ * Processes an image file to make its white background transparent.
+ * @param imageFile The image file to process.
+ * @returns A Promise that resolves with a Blob of the new PNG image.
+ */
+const removeWhiteBackground = (imageFile: File): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Could not get canvas context'));
+
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const threshold = 240; // Pixels with R,G,B values all above this will be transparent
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (r > threshold && g > threshold && b > threshold) {
+            data[i + 3] = 0; // Make pixel transparent
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Canvas to Blob conversion failed'));
+        }, 'image/png'); // Always output as PNG to support transparency
+      };
+      img.onerror = (e) => reject(e);
+      if (event.target?.result) {
+        img.src = event.target.result as string;
+      } else {
+        reject(new Error('FileReader did not return a result'));
+      }
+    };
+    reader.onerror = (e) => reject(e);
+    reader.readAsDataURL(imageFile);
+  });
+};
+
+
 const App: React.FC = () => {
+  const { t } = useSettings();
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [image, setImage] = useState<ImageState>(initialImageState);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
+  const [removeImageBg, setRemoveImageBg] = useState<boolean>(true); // Default to true
   const [error, setError] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const handlePdfDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -32,23 +88,43 @@ const App: React.FC = () => {
       setPdfFile(file);
       setError(null);
     } else {
-      setError('Invalid file type. Please upload a PDF.');
+      setError(t('errorInvalidPdf'));
     }
-  }, []);
+  }, [t]);
 
-  const handleImageDrop = useCallback((acceptedFiles: File[]) => {
+  const handleImageDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (file && file.type.startsWith('image/')) {
-      setImage(prev => ({ 
-        ...initialImageState,
-        file, 
-        objectUrl: URL.createObjectURL(file) 
-      }));
-      setError(null);
+        setIsImageProcessing(true);
+        setError(null);
+        try {
+            let finalFile = file;
+            if (removeImageBg) {
+                const transparentBlob = await removeWhiteBackground(file);
+                const newName = file.name.substring(0, file.name.lastIndexOf('.')) + '.png';
+                finalFile = new File([transparentBlob], newName, { type: 'image/png' });
+            }
+
+            if (image.objectUrl) {
+                URL.revokeObjectURL(image.objectUrl);
+            }
+
+            setImage({
+                ...initialImageState,
+                file: finalFile,
+                objectUrl: URL.createObjectURL(finalFile)
+            });
+        } catch (err) {
+            console.error("Image processing failed:", err);
+            setError(t('errorProcessImage'));
+            setImage(initialImageState);
+        } finally {
+            setIsImageProcessing(false);
+        }
     } else {
-      setError('Invalid file type. Please upload an image.');
+        setError(t('errorInvalidImage'));
     }
-  }, []);
+  }, [removeImageBg, image.objectUrl, t]);
   
   const handleImageUpdate = useCallback((pos: {x: number, y: number}, size: {width: number, height: number}) => {
     setImage(prev => ({...prev, position: pos, size: size}));
@@ -71,7 +147,6 @@ const App: React.FC = () => {
 
 
   useEffect(() => {
-    // Cleanup object URL
     return () => {
       if (image.objectUrl) {
         URL.revokeObjectURL(image.objectUrl);
@@ -81,7 +156,7 @@ const App: React.FC = () => {
 
   const mergeAndDownload = async (pageIndex: number, scale: number) => {
     if (!pdfFile || !image.file) {
-      setError("Please upload both a PDF and an image file.");
+      setError(t('errorMissingFiles'));
       return;
     }
 
@@ -103,12 +178,11 @@ const App: React.FC = () => {
       } else if (image.file.type === 'image/jpeg') {
         embeddedImage = await pdfDoc.embedJpg(imageBuffer);
       } else {
-        throw new Error('Unsupported image type. Please use PNG or JPG.');
+        throw new Error(t('errorUnsupportedImageType'));
       }
       
       const pageHeight = page.getHeight();
 
-      // Convert pixel-based position and size to PDF points
       const x_pt = image.position.x / scale;
       const y_pt = pageHeight - (image.position.y / scale) - (image.size.height / scale);
       const width_pt = image.size.width / scale;
@@ -134,7 +208,8 @@ const App: React.FC = () => {
 
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : 'An unknown error occurred during merging.');
+      const message = err instanceof Error ? err.message : t('errorMerge');
+      setError(message);
     } finally {
       setIsProcessing(false);
     }
@@ -143,9 +218,19 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-brand-bg text-brand-text flex flex-col font-sans">
-      <header className="py-4 px-6 text-center shadow-lg bg-brand-surface">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-wider">PDF Image Merger</h1>
-        <p className="text-brand-text-secondary mt-1 text-sm sm:text-base">Drag, drop, and position your image on any PDF page.</p>
+      <header className="py-4 px-6 text-center shadow-lg bg-brand-surface relative">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-wider">{t('headerTitle')}</h1>
+        <p className="text-brand-text-secondary mt-1 text-sm sm:text-base">{t('headerSubtitle')}</p>
+        <div className="absolute top-1/2 -translate-y-1/2 right-4 sm:right-6">
+            <button 
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
+              className="p-2 rounded-full hover:bg-overlay-bg/10 transition-colors"
+              aria-label={t('settingsTitle')}
+            >
+                <SettingsIcon className="w-6 h-6" />
+            </button>
+            {isSettingsOpen && <SettingsMenu onClose={() => setIsSettingsOpen(false)} />}
+        </div>
       </header>
 
       <main className="flex-grow container mx-auto p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
@@ -154,16 +239,40 @@ const App: React.FC = () => {
             onDrop={handlePdfDrop}
             accept={{ 'application/pdf': ['.pdf'] }}
             file={pdfFile}
-            prompt="Drop PDF Here"
+            prompt={t('dropzonePdfPrompt')}
             fileType="PDF"
+            disabled={isImageProcessing || isProcessing}
           />
           <FileDropzone
             onDrop={handleImageDrop}
             accept={{ 'image/*': ['.png', '.jpg', '.jpeg'] }}
             file={image.file}
-            prompt="Drop Image Here"
+            prompt={isImageProcessing ? t('dropzoneProcessing') : t('dropzoneImagePrompt')}
             fileType="Image"
+            disabled={isImageProcessing || isProcessing}
           />
+          
+          <div className="bg-brand-surface p-4 rounded-lg shadow-lg flex items-center justify-between text-sm">
+            <label htmlFor="transparent-toggle" className="font-semibold text-brand-text flex-grow pr-4 cursor-pointer">{t('transparentToggle')}</label>
+            <button
+              id="transparent-toggle"
+              role="switch"
+              aria-checked={removeImageBg}
+              onClick={() => setRemoveImageBg(!removeImageBg)}
+              disabled={isImageProcessing || isProcessing}
+              className={`${
+                removeImageBg ? 'bg-brand-primary' : 'bg-gray-400 dark:bg-gray-600'
+              } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 focus:ring-offset-brand-surface disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              <span
+                className={`${
+                  removeImageBg ? 'translate-x-6' : 'translate-x-1'
+                } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+              />
+            </button>
+          </div>
+           <p className="text-xs text-brand-text-secondary px-1 -mt-4">{t('transparentTooltip')}</p>
+
           
           {error && <div className="bg-red-500/20 text-red-300 p-3 rounded-md border border-red-500/50">{error}</div>}
         </aside>
@@ -185,17 +294,17 @@ const App: React.FC = () => {
             />
           ) : (
             <div className="flex-grow flex flex-col items-center justify-center p-8 text-center text-brand-text-secondary">
-              <DownloadIcon className="w-16 h-16 mb-4 text-gray-600" />
-              <h2 className="text-xl font-semibold text-brand-text">PDF Preview Area</h2>
-              <p className="mt-2 max-w-sm">Once you upload a PDF file, it will be displayed here for you to edit.</p>
+              <DownloadIcon className="w-16 h-16 mb-4 opacity-50" />
+              <h2 className="text-xl font-semibold text-brand-text">{t('previewAreaTitle')}</h2>
+              <p className="mt-2 max-w-sm">{t('previewAreaSubtitle')}</p>
             </div>
           )}
         </section>
       </main>
 
       <footer className="text-center py-4 px-6 text-brand-text-secondary text-sm bg-brand-surface/50">
-        <p>(C) Noam Gold AI 2025</p>
-        <a href="mailto:gold.noam@gmail.com" className="hover:text-brand-primary transition-colors">Send Feedback</a>
+        <p>{t('footerCopyright')}</p>
+        <a href="mailto:gold.noam@gmail.com" className="hover:text-brand-primary transition-colors">{t('footerFeedback')}</a>
       </footer>
     </div>
   );
